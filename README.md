@@ -1,2 +1,2 @@
 # TrackGAN
-Generating tracks via Generative Adversarial Networks
+Generating racing tracks via Generative Adversarial Networks
