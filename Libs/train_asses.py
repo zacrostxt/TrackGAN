@@ -13,11 +13,16 @@ import time
 # Manipulate the cells output
 from IPython import display
 
+import logging
+logger = logging.getLogger(__name__)
+
+from numpy.random import randint
 
 
 
 
-
+# Used to add some noise to zero probabilities - HARD CODED BAD
+epsilon = 1e-3
 
 
 #IN case of switch into iterations
@@ -27,14 +32,12 @@ from IPython import display
 
 def train(dataset, epochs , generator, discriminator ,generator_optimizer , discriminator_optimizer ,generator_loss , discriminator_loss ,
           summary_writer,checkpoint_manager ,gen_seed,distributions = None ,valid_dataset = None,  starting_epoch = 0 , model_name = 'default_name',
-          noise_dim = 100 , image_save_path = None, DEBUG = False, BATCH_SIZE = 128):
+          noise_dim = 100 , image_save_path = None, DEBUG = False, BATCH_SIZE = 128 , custom_gan_metrics = [] ):
   
 
   total_batches = dataset.cardinality().numpy()
-  # Used to add some noise to zero probabilities - HARD CODED BAD
-  epsilon = 1e-3
 
-  # Keep last 5 generated image to compare
+  # Keep the last 5 generated images to compare visually
   image_collection_deque = deque( maxlen= 5)
 
   # [Real Accuracy, Fake Accuracy]
@@ -62,6 +65,11 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
         # Extracting the inputs for the generator
         extra_inputs = inputs[1:]
 
+        # TRYING A RANDOM GENERATION OF LABELS !!!!
+        #labels_gen = randint(0, 10, BATCH_SIZE)
+        #labels_gen = tf.one_hot(labels_gen, 10)
+        #extra_inputs = labels_gen
+
       #print(image_batch.shape)
       #print(labels_batch.shape)
 
@@ -69,7 +77,8 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
       #gen_loss , disc_loss , real_loss , fake_loss = improved_train_step(image_batch, labels_batch )
       gen_loss , disc_loss , real_loss , fake_loss = train_step( inputs , noise_dim , generator, discriminator ,
                                                                                     generator_optimizer , discriminator_optimizer ,
-                                                                                    generator_loss , discriminator_loss , gen_extra_inputs = extra_inputs , BATCH_SIZE = BATCH_SIZE )
+                                                                                    generator_loss , discriminator_loss , gen_extra_inputs = extra_inputs,
+                                                                                    BATCH_SIZE = BATCH_SIZE, custom_gan_metrics = custom_gan_metrics )
 
       # Store History
       gen_loss_per_batch.append(gen_loss)
@@ -137,7 +146,14 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
       print("Generator Epoch loss {:1.3f}".format(avg_gen_loss.numpy())  )
       print("Discriminator Epoch Total Loss {:1.3f}  Discriminator Epoch Real Loss {:1.3f}  Discriminator Epoch Fake Loss {:1.3f}\n".format(avg_disc_loss.numpy() ,avg_disc_real_loss_per_batch.numpy() , avg_disc_fake_loss_per_batch.numpy()) )
 
-      
+      # Display Metric Results 
+      for gan_metric in custom_gan_metrics:
+        gan_metric.display_results()
+        # Reset the state for the next epoch
+        gan_metric.reset_state()
+
+      # Blank line for order after metrics
+      print()
       
       # Validation Score So Far
       #print("Accuracy on Real Images Last 10 Epoch : {}".format( np.around(discriminator_accuracy[-10:,0],3)) )
@@ -156,36 +172,10 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
     denorm_generated_seed_images = image_utils.denormalize_images(generated_seed_images)
 
 
-    '''
-    # COMPUTE LOG PROB on normalized images (the dataset was normalized when the mean and std got extracted)
-    mean_per_px_gen , _ = image_utils.get_mean_std_per_pixel(generated_seed_images + epsilon)
-    mean_per_channel_gen , std_per_channel_gen = image_utils.get_mean_std_per_channel(generated_seed_images + epsilon)
-    # Per Patch
-    mean_per_patch_channel , _ = image_utils.get_mean_std_per_patch( generated_seed_images + epsilon , patch_shape  = [2,2] , patch_type = 'channel' )
-
-
-    results = {}
-    for key,dist in destributions:
-      results[key] = 
-
-
-    px_log_prob = get_image_sum_log_prob(mean_per_px_gen , px_dist)
-    ch_log_prob = get_image_sum_log_prob(mean_per_channel_gen , ch_px_dist)
-    # Per Patch Loss
-    patch_ch_log_prob = get_image_sum_log_prob(mean_per_patch_channel , patch_ch_px_dist)
     
-
-    print("\nPer Pixel Log Prob   {:.3f} \nPer Channel Log Prob   {:.3f} ".format(px_log_prob , ch_log_prob))
-    print("Per (2,2 )Patch Channel Log Prob   {:.3f} \n".format(patch_ch_log_prob))
-
-    # Log Accuracy on TB
-    with summary_writer.as_default(step=epoch):
-      tf.summary.scalar('Px Log Prob', px_log_prob)
-      tf.summary.scalar('Channel Log Prob', ch_log_prob)
-      tf.summary.scalar('(2,2) Patch Channel Log Prob ', patch_ch_log_prob)
-    '''
+    # Compute the log losses of the generated images vs original images based on the distributions
     if distributions is not None:
-      avg_log_loss_res = extract_distribution_log_losses(distributions , denorm_generated_seed_images)
+      avg_log_losses, avg_kl_divergence = extract_distribution_losses(distributions , denorm_generated_seed_images)
 
 
 
@@ -195,30 +185,22 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
     
     # Stack multiple images generated into a single one
     stacked_image = image_utils.stack_multiple_images(denorm_generated_seed_images)
-    #stacked_image = image_utils.denormalize_images(stacked_image)
-    #image_utils.display_image(stacked_image ,  modify_size_by = 2)
 
     # Keep Track Of latest Generations
     image_collection_deque.append(stacked_image)
+    # Display latest generated images
+    image_utils.display_multiple_image(image_collection_deque , size = (600,600) , inline=True  )
         
 
+
     
-
-
-    # Display latest generated images
-    #for j in range( len(image_collection_deque)-1 ): # Don't show the newly added image
-    #for image_collection in image_collection_deque:
-    # Display
-    image_utils.display_multiple_image(image_collection_deque , size = (600,600) , inline=True  )
-
-    # TO ADJUST
-    
-    image_utils.plot_channels_dist(distributions['Distribution Per Channel'] , title = "Original Data Channel Color Distributions")
+    #Extract Distribution from Generated images
     mean_per_channel_gen , std_per_channel_gen = image_utils.get_mean_std_per_channel(denorm_generated_seed_images)
-    image_utils.plot_channels_dist(tfd.Normal(loc=mean_per_channel_gen+epsilon, scale=std_per_channel_gen+epsilon) , title = "Gen Data Channel Color Distributions")
-    
+    gen_distribution = tfd.Normal(loc=mean_per_channel_gen+epsilon, scale=std_per_channel_gen+epsilon) # Epsilon avoids 0 probs
+    # Plot the Real vs Generated Distribution
+    image_utils.plot_channels_dist( [ distributions['Distribution Per Channel'], gen_distribution], image_channels = 1, title= [ "Original Data Color Distribution Per Channel", "Gen Data Color Distribution Per Channel"] )
+    # ADD the rest of the distribution TO PLOT
 
-    #ch_px_dist = tfd.Normal(loc=mean_per_channel+epsilon, scale=std_per_channel+epsilon)
 
     print ('Time for epoch {} is {} sec'.format(epoch, time.time()-start))
 
@@ -231,21 +213,38 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
       tf.summary.scalar('disc_loss', avg_disc_loss)
       # ADD partial loss ? 
 
-      # Save image to tensorboard - image saving not working
-      #tf.summary.image('image_at_epoch_{:04d}'.format(epoch+1), [stacked_image.astype(np.uint8)])
-      # In order to have a timeseries of images - probably
+      # Save image to tensorboard
+      # In order to have a timeseries of images , the name has to be the same
       tf.summary.image('Generated Image', tf.expand_dims(stacked_image , 0) )
+
+      # Store metrics
+      for gan_metric in custom_gan_metrics:
+        if gan_metric.GAN_module == 'discriminator':
+          real_metric_data, fake_metric_data=  gan_metric.get_history()
+          # Store to tensoardboard the latest value
+          tf.summary.scalar("{} on Real Data".format(gan_metric.name), real_metric_data[-1])
+          tf.summary.scalar("{} on Gen Data".format(gan_metric.name), fake_metric_data[-1])
+
+        elif gan_metric.GAN_module == 'generator':
+          pass
+        else : raise Exception("GAN_module not recognized. Must be 'discriminator' or 'generator'")
+  
+
+
+      if distributions is not None:
+        # Per distribution log loss
+        for key, value in avg_log_losses.items():
+          tf.summary.scalar("Avg Log Loss on {}".format(key), value)
+        
+        # Per distribution KL div
+        for key, value in avg_kl_divergence.items():
+          tf.summary.scalar("Avg KL Divergence on {}".format(key), value)
 
 
       if valid_dataset:
         # Log Accuracy on TB
         tf.summary.scalar('disc_accuracy_on_real', disc_acc_on_real_image)
-        tf.summary.scalar('disc_accuracy_on_fake', disc_acc_on_fake_image)
-
-      if distributions is not None:
-        # Per distribution log loss
-        for key,value in avg_log_loss_res.items():
-          tf.summary.scalar("Avg Log Loss {}".format(key), value)
+        tf.summary.scalar('disc_accuracy_on_fake', disc_acc_on_fake_image)  
       
       # Hoping it writes
       summary_writer.flush()
@@ -258,27 +257,6 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
 
 
 
-# For each distribution passed, calculate the log probabilities that the generated images were generated by those distributions
-def extract_distribution_log_losses(distributions , generated_images):
-  avg_log_loss_res = {}
-  
-  for  key , dist in distributions.items() :
-
-    if re.search("Pixel",key):
-      mean,std = image_utils.get_mean_std_per_pixel(generated_images)
-    elif re.search("Channel" , key):
-      mean,std = image_utils.get_mean_std_per_channel(generated_images)
-    elif re.search("Patch",key):
-      mean,std = image_utils.get_mean_std_per_patch(generated_images , patch_shape  = [2,2] , patch_type = 'channel' )
-    else:
-      raise Exception("No matching found")
-
-    avg_log_loss_res[key] = get_image_sum_log_prob(mean , dist) / (dist.batch_shape[0]*dist.batch_shape[1] ) # Normalize per pixels/patch number
-
-  for key,value in avg_log_loss_res.items():
-    print("Avg Log Loss {} : {}".format(key,value) )
-  
-  return avg_log_loss_res
 
 
 
@@ -312,12 +290,17 @@ def generator_BinaryCrossentropy_loss(fake_output):
 
 
 
+    
+  
+
 
 @tf.function
-def train_step(disc_input , noise_dim ,  generator, discriminator , generator_optimizer , discriminator_optimizer , generator_loss , discriminator_loss , gen_extra_inputs = None , BATCH_SIZE = 128):
+def train_step(disc_input, noise_dim,  generator, discriminator, generator_optimizer, discriminator_optimizer, generator_loss,
+               discriminator_loss, gen_extra_inputs = None, BATCH_SIZE = 128,  custom_gan_metrics = []):
 
-    # gen_extra_inputs - a flexible way of adding additional inputs to the generator    
-    
+    # gen_extra_inputs - a 'flexible' way of adding additional inputs to the generator
+
+
     
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
 
@@ -335,33 +318,33 @@ def train_step(disc_input , noise_dim ,  generator, discriminator , generator_op
         if gen_extra_inputs is not None:
           gen_input =[gen_input , gen_extra_inputs ]
    
-
-
         # Generate Images given inputs
         generated_images = generator( inputs = gen_input , training=True)
-        # Output of the discriminator based on real images
-        real_output = discriminator( disc_input, training=True)
 
         # Add additional provided inputs
         disc_fake_input = generated_images
         if gen_extra_inputs is not None:
           disc_fake_input =[disc_fake_input , gen_extra_inputs ]
 
+
         # Output of the discriminator based on fake images
         fake_output = discriminator( disc_fake_input , training=True)
+        # Output of the discriminator based on real images
+        real_output = discriminator( disc_input, training=True)
 
         # Discriminator loss based on real and fake images
         disc_loss , real_loss , fake_loss = discriminator_loss(real_output, fake_output)
 
-        #print(f"Discriminator real_loss Batch loss { tf.print(tf.math.reduce_mean(real_loss)) }.  Discriminator fake_loss Batch Loss {tf.print(tf.math.reduce_mean(fake_loss))}")
-        #tf.print("Discriminator real_loss Batch loss", tf.math.reduce_mean(real_loss) , "Discriminator fake_loss Batch Loss" ,  tf.math.reduce_mean(fake_loss))
 
         # Discriminator Gradient
         gradients_of_discriminator = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
         # Discriminator Backprop
         discriminator_optimizer.apply_gradients(zip(gradients_of_discriminator, discriminator.trainable_variables))
-        
       
+
+        # Compute some metrics 
+        for gan_metric in custom_gan_metrics:
+          gan_metric.compute_metric(output_on_real_images=real_output, output_on_fake_images=fake_output )
 
       # Train the Generator
   
@@ -389,10 +372,10 @@ def train_step(disc_input , noise_dim ,  generator, discriminator , generator_op
       
       
       
-      
-
 
     return tf.math.reduce_mean(gen_loss) , tf.math.reduce_mean(disc_loss) , tf.math.reduce_mean(real_loss) , tf.math.reduce_mean(fake_loss)
+
+
 
 
 # Validation Step
@@ -452,6 +435,69 @@ def valid_step(valid_dataset):
   return disc_acc_on_real_image , disc_acc_on_fake_image
 
 
+
+
+
+
+
+# For each distribution passed, calculate the log probabilities that the generated images were generated by those distributions and the KL divergence
+def extract_distribution_losses(distributions , generated_images):
+  avg_log_losses = {}
+  avg_kl_divergences = {}
+  
+  # Parse the distributions and extract the correct one from the generated images
+  for  key , dist in distributions.items() :
+
+    # Distribution per Pixel
+    if re.search("Pixel",key):
+      mean, std = image_utils.get_mean_std_per_pixel(generated_images)
+    # Distribution per Channel
+    elif re.search("Channel" , key):
+      mean, std = image_utils.get_mean_std_per_channel(generated_images)
+    # Distribution per Patch
+    elif re.search("Patch",key):
+      mean, std = image_utils.get_mean_std_per_patch(generated_images , patch_shape  = [2,2] , patch_type = 'channel' )
+    else:
+      raise Exception("No matching found")
+
+    # Distribution of the generated images
+    #gen_dist = tfd.Normal(loc= tf.dtypes.cast(mean, tf.float32)+ epsilon, scale=tf.dtypes.cast(std, tf.float32)+ epsilon)
+    gen_dist = tfd.Normal(loc= mean + epsilon, scale=std+ epsilon)
+    # KL divergence
+    mean_kl = mean_kl_divergence(dist, gen_dist)
+
+    # Store Results
+    avg_kl_divergences[key] = mean_kl
+    avg_log_losses[key] = get_image_sum_log_prob(mean , dist) / (dist.batch_shape[0]*dist.batch_shape[1] ) # Normalize per pixels/patch number
+
+
+  # MOVE THE DISPLAY INTO THE MAIN AREA
+  # Display Results
+  for key,value in avg_log_losses.items():
+    print("Avg Log Loss on {} : {}".format(key,value) )
+  
+  print()
+
+  # Display Results
+  for key,value in avg_kl_divergences.items():
+    print("Avg KL Divergence on {} : {}".format(key,value) )
+  
+  return avg_log_losses, avg_kl_divergences
+
+
+
+
+
+
+
+
+# Compute the mean of the KL divergence per pixel
+def mean_kl_divergence(dist_a, dist_b):
+    kl = tfp.distributions.kl_divergence(dist_a, dist_b, allow_nan_stats=True, name=None)
+
+    return np.mean(kl)
+
+
 # Given a distribution , get the sum loglikelyhood -> ( return -loglikelyhood)
 def get_image_sum_log_prob(image, dist):
 
@@ -459,11 +505,9 @@ def get_image_sum_log_prob(image, dist):
     return -np.sum(log_prob)
 
 
-# Generate N*D normal sample noises
-def generate_noise( shape = [1,10]):
-  return tf.random.normal( shape )
 
-# Restore or Generate new Seed
+
+# Restore or Generate new Seed for the Generator
 def get_seed( shape = [1,10] , seed_save_path = None):
 
   if seed_save_path :
@@ -479,11 +523,14 @@ def get_seed( shape = [1,10] , seed_save_path = None):
       np.save(seed_save_path,noise)
       return noise
 
-  return generate_noise( shape = shape )
+  return generate_noise(shape = shape )
     
 
-    
+# Generate N*D normal sample noises
+def generate_noise( shape = [1,10]):
+  return tf.random.normal( shape )    
 
 # Target to One Hot - tf dataset transform
-def to_one_hot_encode(x_,y_):
-  return x_ , tf.one_hot(y_, 10)
+def to_one_hot_encode(x_, y_, n_classes = 10):
+  return x_, tf.one_hot(y_, n_classes)
+

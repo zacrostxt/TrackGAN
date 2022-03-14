@@ -6,6 +6,10 @@ import re   #regex
 import tensorflow as tf
 import numpy as np
 
+import logging
+logger = logging.getLogger(__name__)
+
+
 # Function for model compiling
 def compileModel(model , lr = 1e-3 , loss = tf.keras.losses.CategoricalCrossentropy(), metrics=['accuracy'] ):
 

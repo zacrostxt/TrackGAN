@@ -1,14 +1,14 @@
 import tensorflow as tf
 import numpy as np
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-
-
-
-
-
-
+def test():
+  logger.debug('This is my 😂 debug message ')
+  return
 
 
 #!pip install scikit-learn==0.20

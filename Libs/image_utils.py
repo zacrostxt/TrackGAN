@@ -8,74 +8,90 @@ from PIL import Image
 import imageio
 import glob #it does pattern matching and expansion <- Retrieving filenames on system and such
 
+import logging
+logger = logging.getLogger(__name__)
 
 
 
 
 
-# Plot the histogram per pixel channel mean and the scatter plot of the sampled data on the x-axis and the prob associated in the y-axis
-def plot_channels_dist(dist, title = None):
-  data = dist.sample(10)
-  
-  # Extract the mean value per pixel per channel
-  avg_data = np.mean(data,axis = 0 ) # used for the histogram
-  # Size of the plot
-  plt.subplots(figsize=( 15, 5) )
-
+# Plots several graphs based on the input distributions
+def plot_channels_dist(dists_array, image_channels, title = None):
+ 
+  # Channel colors
   channels = ['red','green','blue']
+
   # Grayscale image
-  if data.shape[3] == 1:
+  if image_channels == 1:
     channels = [ ['orange'] ]
 
-  for ch in range(data.shape[3]):
+  
+  # Total Number of distributions to plot
+  n_dists = len(dists_array)
+  # Expected Columns
+  k_columns = n_dists * image_channels
+  
+  #print(" K columns :" , k_columns)
 
-    #Scatter plot
-    plt.subplot(2 ,  3 , ch+1 )
-    plt.subplots_adjust()
-    plt.scatter(data[:, :,:,ch],  dist.prob(data)[:, :,:,ch] , color=channels[ch], alpha=0.4)
-
-    # Histogram
-    plt.subplot(2 ,  3 , ch+1+3 )
-    plt.hist( avg_data[:,:,ch]) 
-
+  # Size of the plot based on how many figures
+  plt.subplots(figsize=( 7+ 3*n_dists, 12+ n_dists) )
+  # Vertical margin
+  plt.subplots_adjust( hspace = 0.15)
 
   # Add title
-  if title is not None:
-    plt.title(title)
-  plt.show()
+  if title is None:
+    title = [ "Distribution " + str(k+1) for k in range(n_dists) ]
+
+  # For each k dist, plot the relevant graphs
+  for k, dist in enumerate(dists_array):
+
+    dist_samples = dist.sample(10)
+    # Extract the mean value per pixel per channel
+    avg_mean_per_channel = np.mean(dist_samples, axis = 0 ) # used for the histogram
+
+    for ch in range( image_channels ):
+
+      # Column index
+      column_j = ch + k*image_channels + 1
+      # Row index
+      row_1 = 0*n_dists*image_channels
+      row_2 = 1*n_dists*image_channels
+      row_3 = 2*n_dists*image_channels
+
+      #Scatter plot
+      plt.subplot(3 ,  k_columns , row_1 + column_j)
+      plt.title(title[k])
+      plt.scatter(dist_samples[:, :,:,ch],  dist.prob(dist_samples)[:, :,:,ch] , color=channels[ch], alpha=0.4)
+
+      # Histogram
+      plt.subplot(3 ,  k_columns , row_2 + column_j )
+      plt.hist( avg_mean_per_channel[:,:,ch])
+
+      # Image Form
+      plt.subplot(3 ,  k_columns , row_3 + column_j)
+      plt.imshow( avg_mean_per_channel[:,:,ch], interpolation='nearest', aspect='auto' )
+
+      #print(row_1 + column_j ,"  " ,  row_2 + column_j , "   " , row_3 + column_j)
+
+
+  plt.show()  
 
   return
 
 
 
 
-  # Channel selector
-  i = 0
-  # Do it for each channel
-  for color in ['red','green','blue']:
-
-    #Scatter plot
-    plt.subplot(2 ,  3 , i+1 )
-    plt.subplots_adjust()
-    plt.scatter(data[:, :,:,i],  dist.prob(data)[:, :,:,i] , color=color, alpha=0.4)
-
-    # Histogram
-    plt.subplot(2 ,  3 , i+1+3 )
-    plt.hist( avg_data[:,:,i]) 
-
-    i+=1
-  
-
-
+# Extract the Mean and Standard deviation per pixels (If the images have just one channel, this will coincide with the per channel one)
+# result -> [w,h]
 def get_mean_std_per_pixel(image_dataset):
   
   assert image_dataset.shape[-1] == 3 or image_dataset.shape[-1] == 1
 
-  sum_across_images = np.sum(image_dataset,axis=0)
-  #print("Summed across images. New shape : \n",sum_across_images.shape)
+  mean_across_images = np.mean(image_dataset,axis=0)
+  #print("Mean across images. New shape : \n",mean_across_images.shape)
 
-  mean_across_channels = np.mean(sum_across_images,axis =-1) #mean per pixel
-  std_across_channels = np.std(sum_across_images,axis =-1)  #std per pixel
+  mean_across_channels = np.mean(mean_across_images,axis =-1) #mean per pixel
+  std_across_channels = np.std(mean_across_images,axis =-1)  #std per pixel
 
   #print("Mean across channels. New shape : \n",mean_across_channels.shape)
   #print("STD across channels. New shape : \n",std_across_channels.shape)
@@ -83,7 +99,8 @@ def get_mean_std_per_pixel(image_dataset):
 
   return mean_across_channels, std_across_channels
 
-
+# Extract the Mean and Standard deviation per channel 
+# result -> [w,h,ch]
 def get_mean_std_per_channel(image_dataset):
   
   assert image_dataset.shape[-1] == 3 or image_dataset.shape[-1] == 1
@@ -97,7 +114,8 @@ def get_mean_std_per_channel(image_dataset):
   return mean_per_channel,std_per_channel
 
 
-# Compute the average of a small window on the images
+# Compute the average of a small window (patcg) on the images
+# result -> [new_w,new_h,ch] or [new_w,new_h] depending on the mode (per pixel/per channel)
 def get_mean_std_per_patch(image_dataset , patch_shape  = (2,2) , patch_type = 'channel' , overlapping = False):
     
     strides = patch_shape

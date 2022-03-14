@@ -1,6 +1,24 @@
 import tensorflow as tf
 #import numpy as np
 
+import logging
+logger = logging.getLogger(__name__)
+
+# End to End Gan
+def define_gan(g_model, d_model):
+  # make the discriminator layer as non trainable
+  d_model.trainable = False
+  # get the noise and label input from the generator
+  gen_noise, gen_label = g_model.input
+  # get the output from the generator
+  gen_output = g_model.output
+  #connect image output and label input from generator as inputs to      #discriminator
+  gan_output = d_model([gen_output,gen_label])
+  #define gan model as taking noise and label and outputting a #classification
+  model = tf.kreas.Model([gen_noise,gen_label],gan_output)
+ 
+  return model
+
 
 #Generator architecture
 def make_generator_model(input_shape = 100):
@@ -221,6 +239,104 @@ def make_conditioned_discriminator_model(input_image_shape = [28, 28, 1],input_s
 
 
 
+
+
+def define_generator(latent_dim,n_classes=10):
+  label_input = tf.keras.layers.Input(shape=(1,))
+  #Embedding layer
+  em = tf.keras.layers.Embedding(n_classes,50)(label_input)
+  nodes = 7*7
+ 
+  em = tf.keras.layers.Dense(nodes)(em)
+  em = tf.keras.layers.Reshape((7,7,1))(em)
+  #image generator input
+  image_input = tf.keras.layers.Input(shape=(latent_dim,))
+  nodes = 10*7*7
+  d1 = tf.keras.layers.Dense(nodes)(image_input)
+  d1 = tf.keras.layers.LeakyReLU(0.2)(d1)
+  d1 = tf.keras.layers.Reshape((7,7,10))(d1)
+  # merge
+  merge = tf.keras.layers.Concatenate()([d1,em])
+  #upsample to 14x14
+  gen = tf.keras.layers.Conv2DTranspose( 64, (3,3), strides=(2,2), padding='same')(merge)
+  gen = tf.keras.layers.LeakyReLU(0.2)(gen)
+  #upsample to 28x28
+  gen = tf.keras.layers.Conv2DTranspose(32,(3,3),strides=(2,2), padding='same')(gen)
+  gen = tf.keras.layers.LeakyReLU(0.2)(gen)
+  #output layer 
+  out_layer = tf.keras.layers.Conv2D(3,(3,3),activation='tanh', padding='same')(gen)
+  #define model 
+  model = tf.keras.Model([image_input,label_input],out_layer)
+  return model
+
+
+
+
+
+
+def define_discriminator(input_shape=(28,28,1),n_classes=10):
+  # label input
+  in_labels = tf.keras.layers.Input(shape=(1,))
+  # Embedding for categorical input
+  em = tf.keras.layers.Embedding(n_classes,50)(in_labels)
+  # scale up the image dimension with linear activations
+  d1 = tf.keras.layers.Dense(input_shape[0] * input_shape[1])(em)
+  # reshape to additional channel
+  d1 = tf.keras.layers.Reshape((input_shape[0],input_shape[1],1))(d1)
+  # image input
+  image_input = tf.keras.layers.Input(shape=input_shape)
+  #  concate label as channel
+  merge = tf.keras.layers.Concatenate()([image_input,d1])
+  # downsample
+  fe = tf.keras.layers.Conv2D(128,(3,3),strides=(2,2),padding='same')(merge)
+  fe = tf.keras.layers.LeakyReLU(0.2)(fe)
+  # downsample
+  fe = tf.keras.layers.Conv2D(128,(3,3),strides=(2,2),padding='same')(merge)
+  fe = tf.keras.layers.LeakyReLU(0.2)(fe)
+  #flatten feature maps
+  fe = tf.keras.layers.Flatten()(fe)
+  fe = tf.keras.layers.Dropout(0.4)(fe)
+  #ouput
+  out_layer = tf.keras.layers.Dense(1,activation='sigmoid')(fe)
+  #define model
+  model = tf.keras.Model([image_input,in_labels],out_layer)
+  
+  
+  return model
+
+def define_discriminator_rgb(input_shape=(28,28,3),n_classes=10):
+  # label input
+  in_labels = tf.keras.layers.Input(shape=(1,))
+  # Embedding for categorical input
+  em = tf.keras.layers.Embedding(n_classes,50)(in_labels)
+
+  # scale up the image dimension with linear activations
+  d1 = tf.keras.layers.Dense(input_shape[0] * input_shape[1] * input_shape[2])(em)
+  # reshape to additional channel
+  d1 = tf.keras.layers.Reshape((input_shape[0],input_shape[1],input_shape[2] ))(d1)
+
+
+  # image input
+  image_input = tf.keras.layers.Input(shape=input_shape)
+
+  #  concate label as channel
+  merge = tf.keras.layers.Concatenate()([image_input,d1])
+  # downsample
+  fe = tf.keras.layers.Conv2D(128,(3,3),strides=(2,2),padding='same')(merge)
+  fe = tf.keras.layers.LeakyReLU(0.2)(fe)
+  # downsample
+  fe = tf.keras.layers.Conv2D(128,(3,3),strides=(2,2),padding='same')(merge)
+  fe = tf.keras.layers.LeakyReLU(0.2)(fe)
+  #flatten feature maps
+  fe = tf.keras.layers.Flatten()(fe)
+  fe = tf.keras.layers.Dropout(0.4)(fe)
+  #ouput
+  out_layer = tf.keras.layers.Dense(1,activation='sigmoid')(fe)
+  #define model
+  model = tf.keras.Model([image_input,in_labels],out_layer)
+  
+  
+  return model
 
 
 
