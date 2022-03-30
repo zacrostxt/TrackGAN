@@ -1,5 +1,8 @@
 import numpy as np
 import tensorflow as tf
+# Tensorflow Dist
+import tensorflow_probability as tfp
+
 import os
 
 # Libs for Images
@@ -34,7 +37,7 @@ def plot_channels_dist(dists_array, image_channels, title = None):
   #print(" K columns :" , k_columns)
 
   # Size of the plot based on how many figures
-  plt.subplots(figsize=( 7+ 3*n_dists, 12+ n_dists) )
+  plt.subplots(figsize=( 7+ 3*n_dists + 3*image_channels, 12+ n_dists ) )
   # Vertical margin
   plt.subplots_adjust( hspace = 0.15)
 
@@ -53,20 +56,28 @@ def plot_channels_dist(dists_array, image_channels, title = None):
 
       # Column index
       column_j = ch + k*image_channels + 1
+
+      
+
       # Row index
       row_1 = 0*n_dists*image_channels
       row_2 = 1*n_dists*image_channels
       row_3 = 2*n_dists*image_channels
 
+     
+
       #Scatter plot
-      plt.subplot(3 ,  k_columns , row_1 + column_j)
-      plt.title(title[k])
-      plt.scatter(dist_samples[:, :,:,ch],  dist.prob(dist_samples)[:, :,:,ch] , color=channels[ch], alpha=0.4)
+      #plt.subplot(3 ,  k_columns , row_1 + column_j)
+
+      if ch == 1:
+        plt.title(title[k])
+      #plt.scatter(dist_samples[:, :,:,ch],  dist.prob(dist_samples)[:, :,:,ch] , color=channels[ch], alpha=0.4)
 
       # Histogram
       plt.subplot(3 ,  k_columns , row_2 + column_j )
       plt.hist( avg_mean_per_channel[:,:,ch])
 
+      
       # Image Form
       plt.subplot(3 ,  k_columns , row_3 + column_j)
       plt.imshow( avg_mean_per_channel[:,:,ch], interpolation='nearest', aspect='auto' )
@@ -140,6 +151,25 @@ def get_mean_std_per_patch(image_dataset , patch_shape  = (2,2) , patch_type = '
 
     # Eliminate the batch size
     return mean[0], std[0]
+
+
+
+def extract_distribution(data, of_type = "channel", epsilon = 1e-3, **kwargs ):
+
+  # Channel Wise Patch
+  if of_type == 'channel':
+    mean, std = get_mean_std_per_channel(data)
+  # Pixel Wise Patch
+  elif of_type == 'patch':
+    mean, std = get_mean_std_per_patch(data, **kwargs)
+  elif of_type == 'pixel':
+    mean, std = get_mean_std_per_pixel(data)
+  else: raise Exception("Type Not Supported. Supported types 'pixel, channel, patch") 
+
+  dist= tfp.distributions.Normal(loc=mean+epsilon, scale=std+epsilon)
+
+  return dist
+
 
 
 

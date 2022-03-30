@@ -241,27 +241,35 @@ def make_conditioned_discriminator_model(input_image_shape = [28, 28, 1],input_s
 
 
 
-def define_generator(latent_dim,n_classes=10):
+def define_generator(latent_dim, n_class):
   label_input = tf.keras.layers.Input(shape=(1,))
   #Embedding layer
-  em = tf.keras.layers.Embedding(n_classes,50)(label_input)
+  em = tf.keras.layers.Embedding(n_class,20)(label_input)
   nodes = 7*7
  
   em = tf.keras.layers.Dense(nodes)(em)
   em = tf.keras.layers.Reshape((7,7,1))(em)
+
   #image generator input
   image_input = tf.keras.layers.Input(shape=(latent_dim,))
-  nodes = 10*7*7
+  nodes = 20*7*7
   d1 = tf.keras.layers.Dense(nodes)(image_input)
   d1 = tf.keras.layers.LeakyReLU(0.2)(d1)
-  d1 = tf.keras.layers.Reshape((7,7,10))(d1)
+  d1 = tf.keras.layers.Reshape((7,7,20))(d1)
+  
   # merge
   merge = tf.keras.layers.Concatenate()([d1,em])
+  # Extra layer
+  merge = tf.keras.layers.Conv2DTranspose( 128, (3,3), strides=(1,1), padding='same')(merge)
+  merge = tf.keras.layers.Conv2DTranspose( 128, (3,3), strides=(1,1), padding='same')(merge)
   #upsample to 14x14
   gen = tf.keras.layers.Conv2DTranspose( 64, (3,3), strides=(2,2), padding='same')(merge)
   gen = tf.keras.layers.LeakyReLU(0.2)(gen)
   #upsample to 28x28
   gen = tf.keras.layers.Conv2DTranspose(32,(3,3),strides=(2,2), padding='same')(gen)
+  gen = tf.keras.layers.LeakyReLU(0.2)(gen)
+  # Extra
+  gen = tf.keras.layers.Conv2DTranspose(16,(3,3),strides=(1,1), padding='same')(gen)
   gen = tf.keras.layers.LeakyReLU(0.2)(gen)
   #output layer 
   out_layer = tf.keras.layers.Conv2D(3,(3,3),activation='tanh', padding='same')(gen)
@@ -274,41 +282,12 @@ def define_generator(latent_dim,n_classes=10):
 
 
 
-def define_discriminator(input_shape=(28,28,1),n_classes=10):
-  # label input
-  in_labels = tf.keras.layers.Input(shape=(1,))
-  # Embedding for categorical input
-  em = tf.keras.layers.Embedding(n_classes,50)(in_labels)
-  # scale up the image dimension with linear activations
-  d1 = tf.keras.layers.Dense(input_shape[0] * input_shape[1])(em)
-  # reshape to additional channel
-  d1 = tf.keras.layers.Reshape((input_shape[0],input_shape[1],1))(d1)
-  # image input
-  image_input = tf.keras.layers.Input(shape=input_shape)
-  #  concate label as channel
-  merge = tf.keras.layers.Concatenate()([image_input,d1])
-  # downsample
-  fe = tf.keras.layers.Conv2D(128,(3,3),strides=(2,2),padding='same')(merge)
-  fe = tf.keras.layers.LeakyReLU(0.2)(fe)
-  # downsample
-  fe = tf.keras.layers.Conv2D(128,(3,3),strides=(2,2),padding='same')(merge)
-  fe = tf.keras.layers.LeakyReLU(0.2)(fe)
-  #flatten feature maps
-  fe = tf.keras.layers.Flatten()(fe)
-  fe = tf.keras.layers.Dropout(0.4)(fe)
-  #ouput
-  out_layer = tf.keras.layers.Dense(1,activation='sigmoid')(fe)
-  #define model
-  model = tf.keras.Model([image_input,in_labels],out_layer)
-  
-  
-  return model
 
-def define_discriminator_rgb(input_shape=(28,28,3),n_classes=10):
+def define_discriminator_rgb(n_class, input_shape=(28,28,3)):
   # label input
   in_labels = tf.keras.layers.Input(shape=(1,))
   # Embedding for categorical input
-  em = tf.keras.layers.Embedding(n_classes,50)(in_labels)
+  em = tf.keras.layers.Embedding(n_class,20)(in_labels)
 
   # scale up the image dimension with linear activations
   d1 = tf.keras.layers.Dense(input_shape[0] * input_shape[1] * input_shape[2])(em)
@@ -325,7 +304,10 @@ def define_discriminator_rgb(input_shape=(28,28,3),n_classes=10):
   fe = tf.keras.layers.Conv2D(128,(3,3),strides=(2,2),padding='same')(merge)
   fe = tf.keras.layers.LeakyReLU(0.2)(fe)
   # downsample
-  fe = tf.keras.layers.Conv2D(128,(3,3),strides=(2,2),padding='same')(merge)
+  fe = tf.keras.layers.Conv2D(64,(3,3),strides=(2,2),padding='same')(merge)
+  fe = tf.keras.layers.LeakyReLU(0.2)(fe)
+  # downsample
+  fe = tf.keras.layers.Conv2D(32,(3,3),strides=(2,2),padding='same')(merge)
   fe = tf.keras.layers.LeakyReLU(0.2)(fe)
   #flatten feature maps
   fe = tf.keras.layers.Flatten()(fe)
@@ -337,6 +319,129 @@ def define_discriminator_rgb(input_shape=(28,28,3),n_classes=10):
   
   
   return model
+
+
+
+
+
+
+
+
+# INFO GAN MODEL
+def infogan_generator_continuous(n_filters=128, input_size=73):
+    # Build functional API model
+    # input
+    input = tf.keras.layers.Input(shape=(input_size, ))
+
+    # Fully-connected layer.
+    dense_1 = tf.keras.layers.Dense(units=64, use_bias=False) (input)
+    bn_1 = tf.keras.layers.BatchNormalization()(dense_1)
+    act_1 = tf.keras.layers.ReLU()(bn_1)
+
+    # Fully-connected layer. The output should be able to reshape into 7x7
+    dense_2 = tf.keras.layers.Dense(units=7*7*20, use_bias=False) (act_1)
+    bn_2 = tf.keras.layers.BatchNormalization()(dense_2)
+    act_2 = tf.keras.layers.ReLU()(bn_2)
+
+    # Reshape
+    reshape = tf.keras.layers.Reshape(target_shape=(7, 7, 20))(act_2)
+
+    nf = n_filters
+    # First transposed convolutional layer
+
+    tc_1 = tf.keras.layers.Conv2DTranspose(nf, kernel_size=(3, 3), strides=(2, 2), padding='same', use_bias=False)(reshape)
+    bn_1 = tf.keras.layers.BatchNormalization()(tc_1)
+    act_1 = tf.keras.layers.ReLU()(bn_1)
+
+    # Number of filters halved after each transposed convolutional layer
+    nf = nf//2
+    # Second transposed convolutional layer
+    # strides=(2, 2): shape is doubled after the transposed convolution
+    tc_2 = tf.keras.layers.Conv2DTranspose(nf, kernel_size=(3, 3), strides=(2, 2), padding='same', use_bias=False)(act_1)
+    bn_2 = tf.keras.layers.BatchNormalization()(tc_2)
+    act_2 = tf.keras.layers.ReLU()(bn_2)
+
+    # Number of filters halved after each transposed convolutional layer
+    nf = nf//2
+    # Second transposed convolutional layer
+    # strides=(2, 2): shape is doubled after the transposed convolution
+    tc_3 = tf.keras.layers.Conv2DTranspose(nf, kernel_size=(3, 3), strides=(1, 1), padding='same', use_bias=False)(act_2)
+    bn_3 = tf.keras.layers.BatchNormalization()(tc_3)
+    act_3 = tf.keras.layers.ReLU()(bn_3)
+
+
+
+    # Final transposed convolutional layer: output shape: 28x28x1, tanh activation
+    output = tf.keras.layers.Conv2DTranspose(1, kernel_size=(3, 3), strides=(1, 1), 
+                                         padding="same", activation="tanh")(act_3)
+
+    model = tf.keras.models.Model(inputs=input, outputs=output)
+    
+    return model
+
+
+def infogan_discriminator_continuous(n_filters=64, n_class=10, input_shape=(28, 28, 1)):
+    # Build functional API model
+    # Image Input
+    image_input = tf.keras.layers.Input(shape=input_shape)
+
+    nf = n_filters
+    c_1 = tf.keras.layers.Conv2D(nf, kernel_size=(3, 3), strides=(2, 2), padding="same", use_bias=True)(image_input)
+    bn_1 = tf.keras.layers.BatchNormalization()(c_1)
+    act_1 = tf.keras.layers.LeakyReLU(alpha=0.1)(bn_1)
+
+    
+    
+    # Second convolutional layer
+    # Output shape: 7x7
+    c_2 = tf.keras.layers.Conv2D(64, kernel_size=(3, 3), strides=(2, 2), padding="same", use_bias=False)(act_1)
+    bn_2 = tf.keras.layers.BatchNormalization()(c_2)
+    act_2 = tf.keras.layers.LeakyReLU(alpha=0.1)(bn_2)
+
+    # Number of filters doubled after each convolutional layer
+    nf = nf*2
+    # Third convolutional layer
+    # Output shape: 7x7
+    c_3 = tf.keras.layers.Conv2D(100, kernel_size=(3, 3), strides=(2, 2), padding="same", use_bias=False)(act_2)
+    bn_3 = tf.keras.layers.BatchNormalization()(c_3)
+    act_3 = tf.keras.layers.LeakyReLU(alpha=0.1)(bn_3)
+
+    # Flatten the convolutional layers
+    flatten = tf.keras.layers.Flatten()(act_3)
+
+    # FC layer
+    dense = tf.keras.layers.Dense(12, use_bias=False)(flatten)
+    bn = tf.keras.layers.BatchNormalization()(dense)
+    act = tf.keras.layers.LeakyReLU(alpha=0.1)(bn)
+    # Discriminator output. Sigmoid activation function to classify "True" or "False"
+    d_output = tf.keras.layers.Dense(1, activation='sigmoid')(act)
+
+    # Auxiliary output. 
+    q_dense = tf.keras.layers.Dense(12, use_bias=False)(act)
+    q_bn = tf.keras.layers.BatchNormalization()(q_dense)
+    q_act = tf.keras.layers.LeakyReLU(alpha=0.1)(q_bn)
+
+    # Classification (discrete output)
+    clf_out = tf.keras.layers.Dense(n_class, activation="softmax")(q_act)
+
+    # Gaussian distribution mean (continuous output)
+    mu = tf.keras.layers.Dense(1)(q_act)
+
+    # Gaussian distribution standard deviation (exponential activation to ensure the value is positive)
+    sigma = tf.keras.layers.Dense(1, activation=lambda x: tf.math.exp(x))(q_act)
+
+    # Discriminator model (not compiled)
+    d_model = tf.keras.models.Model(inputs=image_input, outputs=d_output)
+
+    # Auxiliary model (not compiled)
+    q_model = tf.keras.models.Model(inputs=image_input, outputs=[clf_out, mu, sigma])
+
+    return d_model, q_model
+
+
+
+
+
 
 
 

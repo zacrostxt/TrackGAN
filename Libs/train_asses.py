@@ -8,6 +8,8 @@ from collections import deque # Used to have limited arrays
 import re #regex
 
 import image_utils
+import custom_metrics
+import data_utils
 
 import time
 # Manipulate the cells output
@@ -30,27 +32,35 @@ epsilon = 1e-3
 #batches_per_epoch = floor(dataset_size / batch_size)
 #total_iterations = batches_per_epoch * total_epochs
 
-def train(dataset, epochs , generator, discriminator ,generator_optimizer , discriminator_optimizer ,generator_loss , discriminator_loss ,
-          summary_writer,checkpoint_manager ,gen_seed,distributions = None ,valid_dataset = None,  starting_epoch = 0 , model_name = 'default_name',
-          noise_dim = 100 , image_save_path = None, DEBUG = False, BATCH_SIZE = 128 , custom_gan_metrics = [] ):
-  
+def train(dataset, epochs, summary_writer, checkpoint_manager,generator, gen_seed, distributions = None ,valid_dataset = None,  starting_epoch = 0 ,
+          image_save_path = None, DEBUG = False, BATCH_SIZE = 128  ,model = None):
+
+
+#def train(dataset, epochs,summary_writer,checkpoint_manager ,gen_seed, distributions = None ,valid_dataset = None,  starting_epoch = 0 , model_name = 'default_name',
+#          image_save_path = None, DEBUG = False, BATCH_SIZE = 128, **kwargs):
+          
 
   total_batches = dataset.cardinality().numpy()
+
+  # Tracks the loss between original data distribution and the generated distribution
+  dist_loss_history= {}
+  # Track the KL divergence between the two
+  kl_divergence_history= {}
 
   # Keep the last 5 generated images to compare visually
   image_collection_deque = deque( maxlen= 5)
 
   # [Real Accuracy, Fake Accuracy]
-  discriminator_accuracy = np.empty( (0,2), float)
+  #discriminator_accuracy = np.empty( (0,2), float)
 
   for epoch in range(starting_epoch , epochs):
     start = time.time()
-    gen_loss_per_batch = []
-    disc_loss_per_batch = []
+    #gen_loss_per_batch = []
+    #disc_loss_per_batch = []
 
     # Discriminator Decomposite Loss
-    disc_real_loss_per_batch = []
-    disc_fake_loss_per_batch = []
+    #disc_real_loss_per_batch = []
+    #disc_fake_loss_per_batch = []
 
     
     
@@ -65,27 +75,30 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
         # Extracting the inputs for the generator
         extra_inputs = inputs[1:]
 
-        # TRYING A RANDOM GENERATION OF LABELS !!!!
-        #labels_gen = randint(0, 10, BATCH_SIZE)
-        #labels_gen = tf.one_hot(labels_gen, 10)
-        #extra_inputs = labels_gen
 
-      #print(image_batch.shape)
-      #print(labels_batch.shape)
+    
 
-      #gen_loss , disc_loss = train_step(image_batch, labels_batch )
-      #gen_loss , disc_loss , real_loss , fake_loss = improved_train_step(image_batch, labels_batch )
-      gen_loss , disc_loss , real_loss , fake_loss = train_step( inputs , noise_dim , generator, discriminator ,
-                                                                                    generator_optimizer , discriminator_optimizer ,
-                                                                                    generator_loss , discriminator_loss , gen_extra_inputs = extra_inputs,
-                                                                                    BATCH_SIZE = BATCH_SIZE, custom_gan_metrics = custom_gan_metrics )
+      if extra_inputs:
+        model.train_step(inputs, gen_extra_inputs = extra_inputs)
+      else:
+        model.train_step(inputs)
+
+      
+
+      #gen_loss , disc_loss , real_loss , fake_loss = train_step_infoGAN( inputs , BATCH_SIZE = BATCH_SIZE, **kwargs)                                                                    
+
+
+
+
 
       # Store History
-      gen_loss_per_batch.append(gen_loss)
-      disc_loss_per_batch.append(disc_loss)
-      disc_real_loss_per_batch.append(real_loss)
-      disc_fake_loss_per_batch.append(fake_loss)
-    
+      #gen_loss_per_batch.append(gen_loss)
+      #disc_loss_per_batch.append(disc_loss)
+      #disc_real_loss_per_batch.append(real_loss)
+      #disc_fake_loss_per_batch.append(fake_loss)
+
+
+
       
       # Every x do something
       do_every = 60
@@ -108,32 +121,18 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
     
     
     # Average the losses per batch
-    avg_gen_loss = tf.math.reduce_mean(gen_loss_per_batch)
-    avg_disc_loss = tf.math.reduce_mean(disc_loss_per_batch)
-    avg_disc_real_loss_per_batch = tf.math.reduce_mean(disc_real_loss_per_batch)
-    avg_disc_fake_loss_per_batch = tf.math.reduce_mean(disc_fake_loss_per_batch)
+    #avg_gen_loss = tf.math.reduce_mean(gen_loss_per_batch)
+    #avg_disc_loss = tf.math.reduce_mean(disc_loss_per_batch)
+    #avg_disc_real_loss_per_batch = tf.math.reduce_mean(disc_real_loss_per_batch)
+    #avg_disc_fake_loss_per_batch = tf.math.reduce_mean(disc_fake_loss_per_batch)
 
     # Reset Values
-    gen_loss_per_batch = []
-    disc_loss_per_batch = []
-    disc_real_loss_per_batch = []
-    disc_fake_loss_per_batch = []
+    #gen_loss_per_batch = []
+    #disc_loss_per_batch = []
+    #disc_real_loss_per_batch = []
+    #disc_fake_loss_per_batch = []
 
 
-
-
-
-
-
-    # Validation Step
-    if valid_dataset:
-      disc_acc_on_real_image , disc_acc_on_fake_image = valid_step(valid_dataset)
-      discriminator_accuracy = np.append( discriminator_accuracy , [ [disc_acc_on_real_image,disc_acc_on_fake_image] ] , axis = 0 )
-      #discriminator_accuracy.append( [disc_acc_on_real_image , disc_acc_on_fake_image] )
-
-        
-    
-        
     
     
     # Save the model and do stuff every x epochs
@@ -143,27 +142,23 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
       save_path = checkpoint_manager.save()
       #save_path = checkpoint.save(file_prefix = 'ckpt')
       print("Saved checkpoint for step {}: {}\n".format(int(checkpoint_manager.checkpoint.step), save_path))
-      print("Generator Epoch loss {:1.3f}".format(avg_gen_loss.numpy())  )
-      print("Discriminator Epoch Total Loss {:1.3f}  Discriminator Epoch Real Loss {:1.3f}  Discriminator Epoch Fake Loss {:1.3f}\n".format(avg_disc_loss.numpy() ,avg_disc_real_loss_per_batch.numpy() , avg_disc_fake_loss_per_batch.numpy()) )
+      #print("Generator Epoch loss {:1.3f}".format(avg_gen_loss.numpy())  )
+      #print("Discriminator Epoch Total Loss {:1.3f}  Discriminator Epoch Real Loss {:1.3f}  Discriminator Epoch Fake Loss {:1.3f}\n".format(avg_disc_loss.numpy() ,avg_disc_real_loss_per_batch.numpy() , avg_disc_fake_loss_per_batch.numpy()) )
 
-      # Display Metric Results 
-      for gan_metric in custom_gan_metrics:
-        gan_metric.display_results()
+      # Print Metric Results 
+      for gan_metric in model.gan_metrics:
+        gan_metric.print_results()
         # Reset the state for the next epoch
         gan_metric.reset_state()
-
+            
       # Blank line for order after metrics
       print()
       
-      # Validation Score So Far
-      #print("Accuracy on Real Images Last 10 Epoch : {}".format( np.around(discriminator_accuracy[-10:,0],3)) )
-      #print("Accuracy on Fake Images Last 10 Epoch : {}".format( np.around(discriminator_accuracy[-10:,1],3)) )
-
-      
+  
 
     # Produce images for the GIF as you go   
       # Save Image every x epochs - Due to Memory Constraint
-    save_image_condition = (epoch + 1) % 3 == 0
+    save_image_condition = (epoch + 1) % 5 == 0
     image_name = 'image_at_epoch_{:04d}.png'.format(epoch+1)
     save_param = {"Save Image" : save_image_condition, "Path" : image_save_path, "filename" : image_name}
     
@@ -175,7 +170,26 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
     
     # Compute the log losses of the generated images vs original images based on the distributions
     if distributions is not None:
-      avg_log_losses, avg_kl_divergence = extract_distribution_losses(distributions , denorm_generated_seed_images)
+      avg_log_losses, avg_kl_divergence = extract_distribution_losses(distributions, denorm_generated_seed_images)
+      
+      # Mantain an history
+      # Per distribution loss
+      for key, value in avg_log_losses.items():
+        new_key = "Log loss on" + key
+        # Initialize dict
+        if new_key not in dist_loss_history:
+          dist_loss_history[new_key] = []
+        # Store value
+        dist_loss_history[new_key].append(value)
+
+      # Per distribution KL div
+      for key, value in avg_kl_divergence.items():
+        new_key = "KL div on" + key
+        # Initialize dict
+        if new_key not in kl_divergence_history:
+          kl_divergence_history[new_key] = []
+        # Store value
+        kl_divergence_history[new_key].append(value)
 
 
 
@@ -195,11 +209,20 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
 
     
     #Extract Distribution from Generated images
-    mean_per_channel_gen , std_per_channel_gen = image_utils.get_mean_std_per_channel(denorm_generated_seed_images)
-    gen_distribution = tfd.Normal(loc=mean_per_channel_gen+epsilon, scale=std_per_channel_gen+epsilon) # Epsilon avoids 0 probs
+    gen_distribution = image_utils.extract_distribution(denorm_generated_seed_images, of_type = "channel", epsilon = 1e-3)
+
     # Plot the Real vs Generated Distribution
     image_utils.plot_channels_dist( [ distributions['Distribution Per Channel'], gen_distribution], image_channels = 1, title= [ "Original Data Color Distribution Per Channel", "Gen Data Color Distribution Per Channel"] )
     # ADD the rest of the distribution TO PLOT
+
+    # Plot the Metrics
+    custom_metrics.plot_metrics(model.gan_metrics)
+
+    # Plot the Log losses and The KL Divergences
+    if distributions:
+      data_utils.plot_data_from_dicts_list( [dist_loss_history, kl_divergence_history] )
+      
+        
 
 
     print ('Time for epoch {} is {} sec'.format(epoch, time.time()-start))
@@ -209,25 +232,29 @@ def train(dataset, epochs , generator, discriminator ,generator_optimizer , disc
     # Finally log to Tensorboard
     with summary_writer.as_default(step=epoch):
       # Log Losses
-      tf.summary.scalar('gen_loss', avg_gen_loss)
-      tf.summary.scalar('disc_loss', avg_disc_loss)
+      #tf.summary.scalar('gen_loss', avg_gen_loss)
+      #tf.summary.scalar('disc_loss', avg_disc_loss)
       # ADD partial loss ? 
 
       # Save image to tensorboard
-      # In order to have a timeseries of images , the name has to be the same
-      tf.summary.image('Generated Image', tf.expand_dims(stacked_image , 0) )
+      if ( epoch+ 1) % 5 == 0 :
+        # In order to have a timeseries of images , the name has to be the same
+        tf.summary.image('Generated Image', tf.expand_dims(stacked_image , 0) )
 
       # Store metrics
-      for gan_metric in custom_gan_metrics:
+      for gan_metric in model.gan_metrics:
         if gan_metric.GAN_module == 'discriminator':
           real_metric_data, fake_metric_data=  gan_metric.get_history()
           # Store to tensoardboard the latest value
           tf.summary.scalar("{} on Real Data".format(gan_metric.name), real_metric_data[-1])
           tf.summary.scalar("{} on Gen Data".format(gan_metric.name), fake_metric_data[-1])
 
-        elif gan_metric.GAN_module == 'generator':
-          pass
-        else : raise Exception("GAN_module not recognized. Must be 'discriminator' or 'generator'")
+        #elif gan_metric.GAN_module == 'generator':
+        else:
+          metric_data =  gan_metric.get_history()
+          tf.summary.scalar("{}".format(gan_metric.name), metric_data[-1])
+
+        #else : raise Exception("GAN_module not recognized. Must be 'discriminator' or 'generator'")
   
 
 
@@ -288,94 +315,7 @@ def generator_BinaryCrossentropy_loss(fake_output):
     
     return cross_entropy(tf.ones_like(fake_output), fake_output)
 
-
-
-    
-  
-
-
-@tf.function
-def train_step(disc_input, noise_dim,  generator, discriminator, generator_optimizer, discriminator_optimizer, generator_loss,
-               discriminator_loss, gen_extra_inputs = None, BATCH_SIZE = 128,  custom_gan_metrics = []):
-
-    # gen_extra_inputs - a 'flexible' way of adding additional inputs to the generator
-
-
-    
-    with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
-
-      # Train the Discriminator K times - In here we have access on only 1 batch. Need to relocate if needed
-      for k in range(0,1):
-
-        # Sample Noise
-        noise = generate_noise( shape = [BATCH_SIZE, noise_dim])
-        #print("NOISE SHAPE : ",gen_input.shape )
-        #print("LABELS SHAPE : ",gen_extra_inputs.shape )
-
-        # Just to have explicit names and clarity
-        gen_input = noise
-        # Check for additional extra inputs for the generator outside the noise
-        if gen_extra_inputs is not None:
-          gen_input =[gen_input , gen_extra_inputs ]
-   
-        # Generate Images given inputs
-        generated_images = generator( inputs = gen_input , training=True)
-
-        # Add additional provided inputs
-        disc_fake_input = generated_images
-        if gen_extra_inputs is not None:
-          disc_fake_input =[disc_fake_input , gen_extra_inputs ]
-
-
-        # Output of the discriminator based on fake images
-        fake_output = discriminator( disc_fake_input , training=True)
-        # Output of the discriminator based on real images
-        real_output = discriminator( disc_input, training=True)
-
-        # Discriminator loss based on real and fake images
-        disc_loss , real_loss , fake_loss = discriminator_loss(real_output, fake_output)
-
-
-        # Discriminator Gradient
-        gradients_of_discriminator = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
-        # Discriminator Backprop
-        discriminator_optimizer.apply_gradients(zip(gradients_of_discriminator, discriminator.trainable_variables))
-      
-
-        # Compute some metrics 
-        for gan_metric in custom_gan_metrics:
-          gan_metric.compute_metric(output_on_real_images=real_output, output_on_fake_images=fake_output )
-
-      # Train the Generator
-  
-      # Sample Noise
-      gen_input = generate_noise( shape = [BATCH_SIZE, noise_dim])
-      # Check for additional extra inputs for the generator outside the noise
-      if gen_extra_inputs is not None:
-        gen_input = [ gen_input , gen_extra_inputs ]
-      # Generate Images given Noise
-      generated_images = generator( gen_input , training=True)
-
-      # Add additional provided inputs
-      disc_fake_input = generated_images
-      if gen_extra_inputs is not None:
-        disc_fake_input =[disc_fake_input , gen_extra_inputs ]
-
-      # Output of the discriminator based on fake images
-      fake_output = discriminator( disc_fake_input , training=True)
-      # Generator loss based only on fake images
-      gen_loss = generator_loss(fake_output)
-      # Generator Gradient
-      gradients_of_generator = gen_tape.gradient(gen_loss, generator.trainable_variables)
-      # Generator Backprop
-      generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
-      
-      
-      
-
-    return tf.math.reduce_mean(gen_loss) , tf.math.reduce_mean(disc_loss) , tf.math.reduce_mean(real_loss) , tf.math.reduce_mean(fake_loss)
-
-
+            
 
 
 # Validation Step
@@ -441,7 +381,7 @@ def valid_step(valid_dataset):
 
 
 # For each distribution passed, calculate the log probabilities that the generated images were generated by those distributions and the KL divergence
-def extract_distribution_losses(distributions , generated_images):
+def extract_distribution_losses(distributions , generated_images, log10= True):
   avg_log_losses = {}
   avg_kl_divergences = {}
   
@@ -461,14 +401,20 @@ def extract_distribution_losses(distributions , generated_images):
       raise Exception("No matching found")
 
     # Distribution of the generated images
-    #gen_dist = tfd.Normal(loc= tf.dtypes.cast(mean, tf.float32)+ epsilon, scale=tf.dtypes.cast(std, tf.float32)+ epsilon)
-    gen_dist = tfd.Normal(loc= mean + epsilon, scale=std+ epsilon)
+    gen_dist = tfd.Normal(loc= tf.dtypes.cast(mean, tf.float32)+ epsilon, scale=tf.dtypes.cast(std, tf.float32)+ epsilon)
+    #gen_dist = tfd.Normal(loc= mean + epsilon, scale=std+ epsilon)
     # KL divergence
     mean_kl = mean_kl_divergence(dist, gen_dist)
 
     # Store Results
     avg_kl_divergences[key] = mean_kl
     avg_log_losses[key] = get_image_sum_log_prob(mean , dist) / (dist.batch_shape[0]*dist.batch_shape[1] ) # Normalize per pixels/patch number
+
+    # Scale
+    if log10:
+      avg_kl_divergences[key] = np.log10(avg_kl_divergences[key])
+      avg_log_losses[key] = np.log10(avg_log_losses[key])
+
 
 
   # MOVE THE DISPLAY INTO THE MAIN AREA
@@ -506,6 +452,34 @@ def get_image_sum_log_prob(image, dist):
 
 
 
+# Source Weight and Biases
+# calculate frechet inception distance
+def calculate_fid(real_embeddings, generated_embeddings):
+  # calculate mean and covariance statistics
+  #mu1, sigma1 = real_embeddings.mean(axis=0), np.cov(real_embeddings, rowvar=False)
+  #mu2, sigma2 = generated_embeddings.mean(axis=0), np.cov(generated_embeddings,  rowvar=False)
+  
+  mu1, sigma1 = np.mean(real_embeddings, axis= 0), np.cov(real_embeddings, rowvar=False)
+  mu2, sigma2 = np.mean(generated_embeddings, axis= 0), np.cov(generated_embeddings,  rowvar=False)
+
+  # calculate sum squared difference between means
+  ssdiff = np.sum((mu1 - mu2)**2.0)
+  # calculate sqrt of product between cov
+  from scipy.linalg import sqrtm
+  # Matrix square root
+  covmean = sqrtm(sigma1.dot(sigma2))
+  #covmean = np.sqrt(sigma1.dot(sigma2))
+
+  # check and correct imaginary numbers from sqrt
+  if np.iscomplexobj(covmean):
+      covmean = covmean.real
+  # calculate score
+  fid = ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean)
+
+  return fid
+
+
+
 
 # Restore or Generate new Seed for the Generator
 def get_seed( shape = [1,10] , seed_save_path = None):
@@ -524,7 +498,76 @@ def get_seed( shape = [1,10] , seed_save_path = None):
       return noise
 
   return generate_noise(shape = shape )
+
+# Restore or Generate new Seed for the Generator
+def get_infogan_seed( shape, n_class, seed_save_path = None):
+
+  if seed_save_path :
     
+    # Need to modify Load/Save
+    try:
+      seed =  np.load(seed_save_path)
+      print("Restoring seed from {}".format(seed_save_path))
+      return seed
+    except:
+      print("Saving new generated seed to {}".format(seed_save_path))
+      noise = tf.keras.layers.Concatenate()( (sample_infogan_gen_input(batch_size=shape[0], noise_dim=shape[1], n_class=n_class)) )
+      np.save(seed_save_path,noise)
+      return noise
+
+  return generate_noise(shape = shape )
+
+# Generate or load a conditioning seed
+def get_cond_seed(num_examples, n_class,as_one_hot = False, seed_save_path= None):
+
+    # Check if a seed already exists
+    if seed_save_path :
+      # Need to modify Load/Save
+      try:
+        cond_seed =  np.load(seed_save_path)
+        print("Restoring seed from {}".format(seed_save_path))
+        return cond_seed
+      except:
+        print("Generating and storing new generated cond seed to {}".format(seed_save_path))
+
+
+
+    if n_class > num_examples:
+      raise Exception("atleast a number of examples equal to the classes has to be generated")
+    
+    if num_examples % n_class:
+      raise Exception("The num_examples is not a multiple of the number of class")
+      
+    
+    # Final Array
+    cond_seed = np.zeros(shape= [num_examples, n_class if as_one_hot else 1 ], dtype= np.int32 )
+
+    # Indexing
+    offset= int(num_examples/ n_class) # how many examples ofthe same class
+
+
+    #print(f"Batch {num_examples} , classes {n_class}, offset {offset}")
+
+    # One hot encode input
+    if as_one_hot:  
+      for i in range(n_class):
+          sample_target = [0] * n_class
+          # Set the index categorical value
+          sample_target[i] = 1
+          cond_seed[i*offset:(i+1)*offset] = sample_target # sample * 4 istance
+    # Categorical input
+    else:
+      for i in range(n_class):
+        # Clone the sample n(4) times
+        cond_seed[i*offset:(i+1)*offset] = i # sample * 4 istance
+    
+    # Save the generated seed
+    if seed_save_path :
+      np.save(seed_save_path, cond_seed)
+
+    return cond_seed
+
+
 
 # Generate N*D normal sample noises
 def generate_noise( shape = [1,10]):
@@ -534,3 +577,16 @@ def generate_noise( shape = [1,10]):
 def to_one_hot_encode(x_, y_, n_classes = 10):
   return x_, tf.one_hot(y_, n_classes)
 
+
+# Info Gan input
+def sample_infogan_gen_input(batch_size=32, noise_dim=62, n_class=10, seed=None):
+  # create noise input
+  noise = tf.random.normal([batch_size, noise_dim], seed=seed)
+  # Create categorical latent code
+  label = tf.random.uniform([batch_size], minval=0, maxval=10, dtype=tf.int32, seed=seed)
+  label = tf.one_hot(label, depth=n_class)
+  # Create one continuous latent code
+  c_1 = tf.random.uniform([batch_size, 1], minval=-1, maxval=1, seed=seed)
+
+  
+  return label, c_1, noise

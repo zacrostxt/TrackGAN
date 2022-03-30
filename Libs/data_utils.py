@@ -1,21 +1,28 @@
 import tensorflow as tf
 import numpy as np
 
-import logging
-
-logger = logging.getLogger(__name__)
+import matplotlib.pyplot as plt
 
 
-def test():
-  logger.debug('This is my 😂 debug message ')
-  return
+
+def plot_data_from_dicts_list(dicts_list):
+
+  fig = plt.figure()
+  ax = plt.subplot()
 
 
-#!pip install scikit-learn==0.20
-#from sklearn.externals import joblib
-#X = load_train(base_path + '/DATA_Rep/pixelart-48x48.dump')
-#save_path = base_path + 'DATA_Rep/pixelart-48x48.npy'
-#np.save(save_path, X)
+  # Over the possible recorder loss/metrics in disctionary form
+  for dict_history in dicts_list:
+    # The various type of metrics (per pixel, per channel, etc)
+    for key, value in dict_history.items():
+      # Plot the history
+      ax.plot(value, label = f"{key}", linewidth=1.0 )
+
+  # Add some info
+  ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1),
+            ncol = 4, fancybox=True, shadow=True)
+  plt.show()
+
 
 def load_train(filename, dim_ordering = 'tf', debug = True, bgr_to_rgb = False) :
     # Expects files to be loaded and pickled as RGB image 
